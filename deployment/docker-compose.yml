@@ -3,14 +3,14 @@ services:
     image: influxdb:2.7.4
     container_name: influxdb
     volumes:
-      - influxdb-vol:(...)
+      - influxdb-vol:/var/lib/influxdb2
     ports:
-      - (...):(...)
-    restart: (...)
+      - "8086:8086"
+    restart: unless-stopped
     environment:
       - DOCKER_INFLUXDB_INIT_MODE=setup
       - DOCKER_INFLUXDB_INIT_USERNAME=admin
-      - DOCKER_INFLUXDB_INIT_PASSWORD=(...)
+      - DOCKER_INFLUXDB_INIT_PASSWORD=admin123456
       - DOCKER_INFLUXDB_INIT_ORG=SolarBiz
       - DOCKER_INFLUXDB_INIT_BUCKET=solar_viz_bucket
       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=a01396360b78797f0523fde24c86ee31
@@ -20,28 +20,14 @@ services:
     container_name: grafana
     depends_on:
       - influxdb
-      - postgresql
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=(...)
+      - GF_SECURITY_ADMIN_PASSWORD=admin123456
     volumes:
-      - grafana-vol:(...)
+      - grafana-vol:/var/lib/grafana
     ports:
-      - (...):(...)
-    restart: (...)
-
-  postgresql:
-    image: postgres:16.0
-    container_name: postgresql_db
-    volumes:
-      - postgresql-vol:/var/lib/postgresql/data
-    ports:
-      - (...):(...)
-    restart: (...)
-    environment:
-      - POSTGRES_PASSWORD=(...)
-      - POSTGRES_DB=solar_viz_db
-      - PGDATA=/var/lib/postgresql/data/pgdata
+      - "3000:3000"
+    restart: unless-stopped
 
 networks:
   default:

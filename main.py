@@ -2,8 +2,8 @@ import time
 import pvlib
 import datetime
 import pandas as pd
-import ... # TODO - Pyhton module that contains configuration info of influx
-import ... # TODO - Pyhton module that contains configuration info of the PhotoVoltaic cells
+import ... # TODO - Pyhton script that contains configuration info of influx
+import ... # TODO - Pyhton script that contains configuration info of the PhotoVoltaic cells
 
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
