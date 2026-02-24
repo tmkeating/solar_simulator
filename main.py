@@ -2,29 +2,27 @@ import time
 import pvlib
 import datetime
 import pandas as pd
-import ... # TODO - Pyhton script that contains configuration info of influx
-import ... # TODO - Pyhton script that contains configuration info of the PhotoVoltaic cells
+import influx_config # TODO - Pyhton script that contains configuration info of influx
+import pv_system_config # TODO - Pyhton script that contains configuration info of the PhotoVoltaic cells
 
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 from pvlib.location import Location
 from pvlib.pvsystem import PVSystem, Array, FixedMount
 
-execution_period = 300
+execution_period = 2
 
 
 def _get_specific_data(full_data, current_time, prev_time_data, prev_data):
-    # TODO - Specific data must be a dictionary with column name as key and the corresponding value as value
     if prev_time_data is None:
         prev_time_data = current_time.replace(hour=current_time.hour-1)
 
-    # TODO - Return closest data, in 30min intervals, to the requested date after prev_data
-    specific_data = {'CodiEstacio': 'XV', 'RelativeHumidityMax': 83.0, 'Wind': 2.2, 'WindDirection': 141.0,
-                     'Temperature': 17.5, 'RelativeHumidity': 80.0, 'Rain': 0.0, 'Irradiance': 203.0,
-                     'TemperatureMax': 18.2, 'TemperatureMin': 17.0, 'RelativeHumidityMin': 76.0,
-                     'WindGust': 5.4, 'WindDirectionGust': 163.0, 'RainMax': 0.0}
-    return specific_data, prev_time_data
+    # Search for the nearest data point in full_data matching current month/day/time
+    target_time = current_time.replace(year=full_data.index[0].year)
+    idx = full_data.index.get_indexer([target_time], method='nearest')[0]
+    specific_data = full_data.iloc[idx].to_dict()
 
+    return specific_data, current_time
 
 def _get_pv_structure(scenario_configuration, pv_module, modules_line, columns_array, name_array):
     scenario_mount = FixedMount(surface_tilt=scenario_configuration['tilt'],
@@ -36,24 +34,26 @@ def _get_pv_structure(scenario_configuration, pv_module, modules_line, columns_a
 
 
 def _get_effective_irradiance(scenario_config, solar_position, meteo_data):
-    # TODO - Substitute ... to the name of the column that contains Irradiance
-    if meteo_data[...] != 0:
+    # Irradiance is in the 'values' column
+    if meteo_data['values'] != 0:
         aoi_scenario = pvlib.irradiance.aoi(surface_tilt=scenario_config['tilt'], surface_azimuth=scenario_config['orientation'],
                                             solar_zenith=solar_position.apparent_zenith, solar_azimuth=solar_position.azimuth)
         iam_scenario = pvlib.iam.ashrae(aoi=aoi_scenario)
-        effective_irradiance = meteo_data[...]*iam_scenario
+        effective_irradiance = meteo_data['values']*iam_scenario
 
     else:
-        effective_irradiance = meteo_data[...]
+        effective_irradiance = meteo_data['values']
 
     return effective_irradiance
 
 
 def _get_temperature_cell(meteo_data):
-    # TODO - This function requires Irradiance, Air Temperature and Wind Speed information.
-    temp_cell = pvlib.temperature.faiman(meteo_data[...],
-                                         meteo_data[...],
-                                         meteo_data[...])
+    # This function requires Irradiance, Air Temperature and Wind Speed information.
+    # Fallback to standard values for temp/wind if not present in CSV
+    irradiance = meteo_data.get('values', 0)
+    temp_air = meteo_data.get('Temperature', 20)
+    wind_speed = meteo_data.get('Wind', 2)
+    temp_cell = pvlib.temperature.faiman(irradiance, temp_air, wind_speed)
     return temp_cell
 
 
@@ -87,28 +87,63 @@ def _get_solarposition(scenario_location, current_time):
 def _request_meteodata(_folder_data):
     data_format = '%Y-%m-%d %H:%M:%S'
 
-    meteocat_df = pd.read_csv(_folder_data + 'meteo_full_df.csv', sep=';')
+    meteocat_df = pd.read_csv(_folder_data + 'meteo_full_df.csv', sep=',', decimal=',')
     # TODO -  Subtitute ... for Date Time column
-    meteocat_df[...] = meteocat_df[...].apply(lambda x: pd.to_datetime(x, utc=True, format=data_format) + datetime.timedelta(minutes=30))
-    # TODO -  Subtitute ... for Irradiance column
-    meteocat_df[...] = meteocat_df[...].apply(lambda x: 0. if x < 0. else x)
-    meteocat_df.set_index(..., inplace=True)
+    meteocat_df['DateTime'] = meteocat_df['DateTime'].apply(lambda x: pd.to_datetime(x, utc=True, format=data_format) + datetime.timedelta(minutes=30))
+    # Convert values column to numeric, forcing errors to NaN if any strings remain
+    meteocat_df['values'] = pd.to_numeric(meteocat_df['values'].astype(str).str.replace(',', '.'), errors='coerce')
+    
+    # Irradiance (values column) - replace negative values or NaNs with 0.0
+    meteocat_df['values'] = meteocat_df['values'].apply(lambda x: 0. if pd.isna(x) or x < 0. else x)
+    meteocat_df.set_index('DateTime', inplace=True)
 
     return meteocat_df
 
 
-def _send_energy_to_influx_db(influx_conf, write_api, tag_id, report):
-    # TODO - Write (DC and AC production) to InfluxDB, in an appropiate _mesurement, _field and ID
-    # TODO - Optionally indicate the correct type for the values to the DB
-    point_to_store = (...)
-    write_api.(...)
+def _send_energy_to_influx_db(influx_conf, write_api, tag_id, report, timestamp=None):
+    # DC and AC production to InfluxDB measurement 'solar_production'
+    bucket = influx_conf.get('influx_database')
+    if bucket is None or bucket is Ellipsis:
+        bucket = 'solar_viz_bucket'
+        
+    point_to_store = Point("solar_production") \
+        .tag("ID", tag_id) \
+        .field("DC_Production", float(report['energyDCProduction'])) \
+        .field("AC_Production", float(report['energyACProduction']))
+    
+    # If a timestamp is provided (simulated time), use it; otherwise use now
+    if timestamp:
+        # Crucial for v2: Ensure timestamp is converted to UTC nanosecond precision
+        # or simplified to a DateTime object that the library can handle
+        point_to_store.time(pd.to_datetime(timestamp).tz_convert('UTC'))
+    
+    try:
+        write_api.write(bucket=bucket, record=point_to_store)
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Sent data for {timestamp or 'now'} to InfluxDB: "
+              f"DC={report['energyDCProduction']:.2f}kW, AC={report['energyACProduction']:.2f}kW")
+    except Exception as e:
+        print(f"Failed to send data to InfluxDB: {e}")
 
 
 def _get_influx_db(influx_conf):
-    # TODO - Correct port
+    # Construct InfluxDB URL from configuration
     try:
-        client = InfluxDBClient(url="http://localhost:...", token=influx_conf['influx_token'], org=influx_conf['influx_org'])
-    except:
+        host = influx_conf.get('influx_host')
+        if host is None or host is Ellipsis:
+            host = 'localhost'
+            
+        port = influx_conf.get('influx_port')
+        if port is None or port is Ellipsis:
+            port = 8086
+            
+        org = influx_conf.get('influx_org')
+        if org is None or org is Ellipsis:
+            org = 'SolarBiz'
+            
+        url = f"http://{host}:{port}"
+        client = InfluxDBClient(url=url, token=influx_conf['influx_token'], org=org)
+    except Exception as e:
+        print(f"Error connecting to InfluxDB: {e}")
         client = None
     return client
 
@@ -132,16 +167,18 @@ def main():
     system_UAB = PVSystem(arrays=UAB_array)
 
     meteo_data = _request_meteodata(_folder_data='./WeatherData/Data/')
+    data_year = meteo_data.index[0].year
+    
     while True:
         time_now = datetime.datetime.now(datetime.timezone.utc)
-        current_time = time_now.replace(year=2020)
+        current_time = time_now.replace(year=data_year)
 
         meteo_specific_UAB, prev_time_UAB = _get_specific_data(meteo_data, current_time, prev_time_UAB,
                                                                meteo_specific_UAB)
         solarpos_UAB = _get_solarposition(scenario_location=location_UAB, current_time=current_time)
 
-        # TODO -  Subtitute ... for Irradiance column
-        if meteo_specific_UAB is not None and meteo_specific_UAB[...] != 0:
+        # Use 'values' as the irradiance column
+        if meteo_specific_UAB is not None and meteo_specific_UAB.get('values', 0) != 0:
             effective_irradiance_UAB = _get_effective_irradiance(scenario_config=UAB_config,
                                                                  solar_position=solarpos_UAB,
                                                                  meteo_data=meteo_specific_UAB)
@@ -167,7 +204,7 @@ def main():
             'energyDCProduction': dc_production_UAB_val,
         }
         _send_energy_to_influx_db(influx_conf=influx_conf, write_api=write_influx_api, tag_id='UAB_Enginyeria',
-                                  report=report_energy)
+                                  report=report_energy, timestamp=time_now)
         time.sleep(execution_period)
 
 
