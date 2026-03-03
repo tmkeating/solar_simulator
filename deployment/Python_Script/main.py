@@ -219,7 +219,7 @@ def main():
                                                        pdc0=pv_inverter['pdc0'],
                                                        eta_inv_nom=pv_inverter['eta_inv_norm'],
                                                        eta_inv_ref=pv_inverter['eta_inv_ref'])
-            production_ac_UAB_val = list(production_ac_UAB)[0] / 1000
+            production_ac_UAB_val = float(production_ac_UAB.iloc[0] if hasattr(production_ac_UAB, 'iloc') else production_ac_UAB) / 1000
 
         else:
             dc_production_UAB_val = 0.

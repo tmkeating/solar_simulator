@@ -29,6 +29,17 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
+  python-script:
+    build:
+      context: ./Python_Script
+      dockerfile: Dockerfile
+    container_name: python-script
+    depends_on:
+      - influxdb
+    volumes:
+      - /home/twyla/Documents/Classes/smartIndustry/solar_simulator/solar_simulator/WeatherData/Data:/app/WeatherData/Data
+    restart: unless-stopped
+
 networks:
   default:
     name: solar_viz_net

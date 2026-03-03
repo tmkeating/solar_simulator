@@ -1,12 +1,14 @@
-FROM python:3.10.13-slim  
-  
-WORKDIR /solar_simulation  
-  
-COPY ./Python_Script/linux_config.py .  
-COPY ./Python_Script/pv_system_config.py .  
-COPY ./Python_Script/influx_config.py .  
-COPY ./Python_Script/main.py .  
-  
-RUN pip install --upgrade pip 
-RUN pip install -r requirements.txt  
-CMD [ "python3", "-u", "main.py" ] 
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY main.py .
+COPY influx_config.py .
+COPY pv_system_config.py .
+
+CMD ["python", "-u", "main.py"]
