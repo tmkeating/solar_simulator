@@ -14,13 +14,39 @@ execution_period = 2
 
 
 def _get_specific_data(full_data, current_time, prev_time_data, prev_data):
-    if prev_time_data is None:
-        prev_time_data = current_time.replace(hour=current_time.hour-1)
-
-    # Search for the nearest data point in full_data matching current month/day/time
+    # Search for the surrounding data points in full_data matching current month/day/time
     target_time = current_time.replace(year=full_data.index[0].year)
-    idx = full_data.index.get_indexer([target_time], method='nearest')[0]
-    specific_data = full_data.iloc[idx].to_dict()
+    
+    # Get the indices of the points before and after target_time
+    idx_after = full_data.index.get_indexer([target_time], method='bfill')[0]
+    idx_before = full_data.index.get_indexer([target_time], method='ffill')[0]
+
+    # If target_time is exactly on a point, or we're at the very start/end
+    if idx_after == idx_before or idx_after == -1 or idx_before == -1:
+        idx = idx_after if idx_after != -1 else idx_before
+        specific_data = full_data.iloc[idx].to_dict()
+    else:
+        # Perform linear interpolation: v(t) = v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+        t0 = full_data.index[idx_before]
+        t1 = full_data.index[idx_after]
+        v0 = full_data.iloc[idx_before]
+        v1 = full_data.iloc[idx_after]
+        
+        # Ensure we only interpolate numeric values to avoid TypeError with strings
+        v0_numeric = pd.to_numeric(v0, errors='coerce')
+        v1_numeric = pd.to_numeric(v1, errors='coerce')
+        
+        # Calculate interpolation factor (progress between t0 and t1, 0.0 to 1.0)
+        time_diff_total = (t1 - t0).total_seconds()
+        time_diff_current = (target_time - t0).total_seconds()
+        factor = time_diff_current / time_diff_total
+        
+        # Interpolate numeric columns and keep non-numeric as is from v0
+        interpolated_values = v0_numeric + (v1_numeric - v0_numeric) * factor
+        specific_data = v0.to_dict()
+        for col in interpolated_values.index:
+            if not pd.isna(interpolated_values[col]):
+                specific_data[col] = interpolated_values[col]
 
     return specific_data, current_time
 
@@ -130,7 +156,7 @@ def _get_influx_db(influx_conf):
     try:
         host = influx_conf.get('influx_host')
         if host is None or host is Ellipsis:
-            host = 'influxdb'
+            host = 'localhost'
             
         port = influx_conf.get('influx_port')
         if port is None or port is Ellipsis:
